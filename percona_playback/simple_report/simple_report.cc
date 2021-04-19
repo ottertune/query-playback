@@ -139,8 +139,11 @@ public:
 
     if (!ignore_row_result_diffs && actual.getRowsSent() != expected.getRowsSent())
     {
-      nr_queries_rows_differ++;
-      fprintf(stderr, _("Connection %"PRIu64" Rows Sent: %"PRIu64 " != expected %"PRIu64 " for query: %s\n"), thread_id, actual.getRowsSent(), expected.getRowsSent(), query.c_str());
+      /* Skip this if the input log is general log, because it does not have rows information (value is always 0).*/
+      if (expected.getRowsSent() > 0) {
+        nr_queries_rows_differ++;
+        fprintf(stderr, _("Connection %"PRIu64" Rows Sent: %"PRIu64 " != expected %"PRIu64 " for query: %s\n"), thread_id, actual.getRowsSent(), expected.getRowsSent(), query.c_str());
+      }
     }
 
     nr_queries_executed++;
