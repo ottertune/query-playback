@@ -37,6 +37,35 @@
 #include <percona_playback/plugin.h>
 #include <percona_playback/query_result.h>
 
+#include <list>
+#include <tbb/concurrent_queue.h>
+
+
+class QueryReport {
+
+  private:
+    uint64_t thread_id;
+    long duration_us;  // microseconds
+
+  public:
+    void set_thread_id(uint64_t _thread_id) {
+      thread_id = _thread_id;
+    }
+
+    uint64_t get_thread_id() {
+      return thread_id;
+    }
+
+    void set_duration_us(long _duration_us) {
+      duration_us = _duration_us;
+    }
+
+    long get_duration_us() {
+      return duration_us;
+    }
+};
+
+
 class SimpleReportPlugin : public percona_playback::ReportPlugin
 {
 private:
@@ -65,6 +94,10 @@ private:
 
   bool show_connection_query_count;
   bool ignore_row_result_diffs;
+
+
+  tbb::concurrent_queue<QueryReport> query_report_results;
+
 
 public:
   SimpleReportPlugin(std::string _name) : ReportPlugin(_name)
@@ -136,6 +169,11 @@ public:
       (*(it_pair.first)).second++;
     }
 
+    // query report has the statistics like duration, thread id, etc.
+    QueryReport query_report;
+    query_report.set_thread_id(thread_id);
+    query_report.set_duration_us(actual.getDuration().total_microseconds());
+    query_report_results.push(query_report);
 
     if (!ignore_row_result_diffs && actual.getRowsSent() != expected.getRowsSent())
     {
@@ -224,6 +262,17 @@ public:
       printf("\n");
     }
 
+    print_summary();
+  }
+
+  void print_summary() {
+    std::list<QueryReport> results;
+    QueryReport res;
+    while(query_report_results.try_pop(res)) {
+      results.push_back(res);
+    }
+    for (std::list<QueryReport>::iterator it=results.begin(); it != results.end(); ++it)
+        printf(_("duration microseconds %d\n"), it->get_duration_us());
   }
 
 };
