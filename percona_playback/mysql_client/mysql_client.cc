@@ -170,6 +170,10 @@ bool MySQLDBThread::test_connect(MySQLOptions* opt) {
   thread->queries->push(boost::make_shared<FinishEntry>());
   thread->start_thread();
   thread->join();
+
+  /* test connection */
+  thread->connect();
+  thread->disconnect();
   return thread->num_connect_errors == 0;
 }
 

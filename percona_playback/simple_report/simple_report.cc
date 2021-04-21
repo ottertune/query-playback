@@ -37,6 +37,113 @@
 #include <percona_playback/plugin.h>
 #include <percona_playback/query_result.h>
 
+#include <list>
+#include <tbb/concurrent_queue.h>
+
+#include <vector>
+#include <algorithm>    // std::sort
+#include <math.h>       // sqrt
+#include <fstream>
+
+#include <iostream>
+#include <ctime>
+#include <string>
+
+class DistributionStatistics {
+  private:
+    long long count;
+    double average;
+    double standardDeviation;
+    long percentiles[8];
+
+    static const int MINIMUM = 0;
+    static const int PERCENTILE_25TH = 1;
+    static const int MEDIAN = 2;
+    static const int PERCENTILE_75TH = 3;
+    static const int PERCENTILE_90TH = 4;
+    static const int PERCENTILE_95TH = 5;
+    static const int PERCENTILE_99TH = 6;
+    static const int MAXIMUM = 7;
+    const double PERCENTILES[8] = { 0.0, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99, 1.0 };
+
+  public:
+
+    void computeStatistics(std::vector<long> & values) {
+      std::sort(values.begin(), values.end());
+      count = values.size();
+      if (count == 0) {
+        //cannot compute statistics for an empty list
+        return;
+      }
+      for (int i = 0; i < 8; i++) {
+        long long index = (long long)(count - 1) * PERCENTILES[i];
+        percentiles[i] = values[index];
+      }
+
+      double sum = 0;
+      for (int i = 0; i < count; i++) {
+        sum += values[i];
+      }
+      average = sum / count;
+
+      double sumDiffsSquared = 0;
+      for (int i = 0; i < count; i++) {
+        double v = values[i] - average;
+        sumDiffsSquared += v * v;
+      }
+
+      if (count > 1) {
+        standardDeviation = sqrt(sumDiffsSquared / (count - 1));
+      }
+    }
+
+    std::string get_summary_str() {
+
+      std::ostringstream oss;
+      oss << "            # Query  : " << count << std::endl;
+      oss << "Latency Average(us)  : " << average << std::endl;
+      oss << " Latency StdDev(us)  : " << standardDeviation << std::endl;
+      oss << "Latency Minimum(us)  : " << percentiles[MINIMUM] << std::endl;
+      oss << "    Latency P25(us)  : " << percentiles[PERCENTILE_25TH] << std::endl;
+      oss << " Latency Median(us)  : " << percentiles[MEDIAN] << std::endl;
+      oss << "    Latency P75(us)  : " << percentiles[PERCENTILE_75TH] << std::endl;
+      oss << "    Latency P90(us)  : " << percentiles[PERCENTILE_90TH] << std::endl;
+      oss << "    Latency P95(us)  : " << percentiles[PERCENTILE_95TH] << std::endl;
+      oss << "    Latency P99(us)  : " << percentiles[PERCENTILE_99TH] << std::endl;
+      oss << "Latency Maximum(us)  : " << percentiles[MAXIMUM] << std::endl;
+
+      return oss.str();
+    }
+
+};
+
+
+
+class QueryReport {
+
+  private:
+    uint64_t thread_id;
+    long duration_us;  // microseconds
+
+  public:
+    void set_thread_id(uint64_t _thread_id) {
+      thread_id = _thread_id;
+    }
+
+    uint64_t get_thread_id() {
+      return thread_id;
+    }
+
+    void set_duration_us(long _duration_us) {
+      duration_us = _duration_us;
+    }
+
+    long get_duration_us() {
+      return duration_us;
+    }
+};
+
+
 class SimpleReportPlugin : public percona_playback::ReportPlugin
 {
 private:
@@ -49,6 +156,9 @@ private:
   tbb::atomic<uint64_t> expected_total_execution_time_ms;
   tbb::atomic<uint64_t> nr_quicker_queries;
   tbb::atomic<uint64_t> nr_slower_queries;
+
+  boost::posix_time::ptime start_time;
+  boost::posix_time::ptime end_time;
 
 #if TBB_VERSION_MAJOR < 3
   tbb::mutex connection_query_count_mutex;
@@ -65,6 +175,10 @@ private:
 
   bool show_connection_query_count;
   bool ignore_row_result_diffs;
+
+
+  tbb::concurrent_queue<QueryReport> query_report_results;
+  unsigned int report_interval = 1000000;
 
 public:
   SimpleReportPlugin(std::string _name) : ReportPlugin(_name)
@@ -93,6 +207,7 @@ public:
      ("ignore-row-result-diffs",
       po::value<bool>(&ignore_row_result_diffs)->default_value(false)->zero_tokens(),
       _("Ignore differences in the number of rows returned."))
+     ("report-interval", po::value<unsigned int>(), _("How often should we print the report log"))
     ;
 
     return &simple_report_options;
@@ -108,6 +223,13 @@ public:
 		  "command line options\n"));
 	return -1;
       }
+    if (vm.count("report-interval"))
+    {
+      report_interval = vm["report-interval"].as<unsigned int>();
+    }
+
+    start_time= boost::posix_time::microsec_clock::universal_time();
+
     return 0;
   }
 
@@ -136,11 +258,13 @@ public:
       (*(it_pair.first)).second++;
     }
 
-
     if (!ignore_row_result_diffs && actual.getRowsSent() != expected.getRowsSent())
     {
-      nr_queries_rows_differ++;
-      fprintf(stderr, _("Connection %"PRIu64" Rows Sent: %"PRIu64 " != expected %"PRIu64 " for query: %s\n"), thread_id, actual.getRowsSent(), expected.getRowsSent(), query.c_str());
+      /* Skip this if the input log is general log, because it does not have rows information (value is always 0).*/
+      if (expected.getRowsSent() > 0) {
+        nr_queries_rows_differ++;
+        fprintf(stderr, _("Connection %"PRIu64" Rows Sent: %"PRIu64 " != expected %"PRIu64 " for query: %s\n"), thread_id, actual.getRowsSent(), expected.getRowsSent(), query.c_str());
+      }
     }
 
     nr_queries_executed++;
@@ -157,6 +281,16 @@ public:
       else
         nr_slower_queries++;
     }
+
+    if (actual.getDuration().total_microseconds() > 0) {
+      // query report has the statistics like duration, thread id, etc.
+      QueryReport query_report;
+      query_report.set_thread_id(thread_id);
+      query_report.set_duration_us(actual.getDuration().total_microseconds());
+      query_report_results.push(query_report);
+    }
+    if (nr_queries_executed % report_interval == 0)
+      std::cout << nr_queries_executed << " queries are executed" << std::endl;
   }
 
   virtual void print_report()
@@ -221,6 +355,67 @@ public:
       printf("\n");
     }
 
+    output_data();
+  }
+
+  void output_data() {
+
+    end_time= boost::posix_time::microsec_clock::universal_time();
+    
+    std::list<QueryReport> results;
+    QueryReport res;
+    while(query_report_results.try_pop(res)) {
+      results.push_back(res);
+    }
+    std::vector<long> latencies;
+
+
+    std::time_t ts = std::time(NULL);
+    std::ostringstream fnames;
+    fnames << "replay_results_" << ts << ".txt";
+
+    std::ofstream myfile;
+    myfile.open (fnames.str().c_str());
+
+    // output results
+    myfile << "Thread ID, Duration(microseconds)" << std::endl;
+    for (std::list<QueryReport>::iterator it=results.begin(); it != results.end(); ++it) {
+        myfile << it->get_thread_id() << ", " << it->get_duration_us() << std::endl;
+        latencies.push_back(it->get_duration_us());
+    }
+    myfile.close();
+
+    // output summary statistics
+    DistributionStatistics dist;
+    dist.computeStatistics(latencies);
+    std::string summary_str = dist.get_summary_str();
+    output_summary(summary_str);
+
+  }
+
+  void output_summary(std::string summary) {
+
+    std::ofstream myfile;
+
+    std::time_t ts = std::time(NULL);
+    std::ostringstream fnames;
+    fnames << "replay_summary_" << ts << ".txt";
+    myfile.open (fnames.str().c_str());
+
+    std::ostringstream final_summary;
+    final_summary << summary;
+    final_summary << "         Start Time  : " << start_time << std::endl;
+    final_summary << "  Replay Start Time  : " << start_time << std::endl;
+    final_summary << "    Replay End Time  : " << end_time << std::endl;
+    final_summary << "  Replay Total Time  : " << end_time - start_time << std::endl;
+    final_summary << "Replay Total Time(s) : " << (end_time - start_time).total_seconds() << std::endl;
+    myfile << final_summary.str();
+    myfile.close();
+
+    std::cout << "------------------------------------" << std::endl;
+    std::cout << "Summary Statistics: " << std::endl;
+    std::cout << "------------------------------------" << std::endl;
+    std::cout << final_summary.str() << std::endl;
   }
 
 };
