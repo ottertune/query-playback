@@ -40,6 +40,99 @@
 #include <list>
 #include <tbb/concurrent_queue.h>
 
+#include <vector>
+#include <algorithm>    // std::sort
+#include <math.h>       // sqrt
+#include <fstream>
+
+#include <iostream>
+#include <ctime>
+#include <string>
+
+class DistributionStatistics {
+  private:
+    long long count;
+    double average;
+    double standardDeviation;
+    long percentiles[8];
+
+    static const int MINIMUM = 0;
+    static const int PERCENTILE_25TH = 1;
+    static const int MEDIAN = 2;
+    static const int PERCENTILE_75TH = 3;
+    static const int PERCENTILE_90TH = 4;
+    static const int PERCENTILE_95TH = 5;
+    static const int PERCENTILE_99TH = 6;
+    static const int MAXIMUM = 7;
+    const double PERCENTILES[8] = { 0.0, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99, 1.0 };
+
+  public:
+
+    void computeStatistics(std::vector<long> & values) {
+      std::sort(values.begin(), values.end());
+      count = values.size();
+      if (count == 0) {
+        //cannot compute statistics for an empty list
+        return;
+      }
+      for (int i = 0; i < 8; i++) {
+        long long index = (long long)(count - 1) * PERCENTILES[i];
+        percentiles[i] = values[index];
+      }
+
+      double sum = 0;
+      for (int i = 0; i < count; i++) {
+        sum += values[i];
+      }
+      average = sum / count;
+
+      double sumDiffsSquared = 0;
+      for (int i = 0; i < count; i++) {
+        double v = values[i] - average;
+        sumDiffsSquared += v * v;
+      }
+
+      if (count > 1) {
+        standardDeviation = sqrt(sumDiffsSquared / (count - 1));
+      }
+    }
+
+    void output_stats() {
+
+      std::ostringstream oss;
+      oss << "  Count  : " << count << std::endl;
+      oss << "Average  : " << average << std::endl;
+      oss << " StdDev  : " << standardDeviation << std::endl;
+      oss << "Minimum  : " << percentiles[MINIMUM] << std::endl;
+      oss << "    P25  : " << percentiles[PERCENTILE_25TH] << std::endl;
+      oss << " Median  : " << percentiles[MEDIAN] << std::endl;
+      oss << "    P75  : " << percentiles[PERCENTILE_75TH] << std::endl;
+      oss << "    P90  : " << percentiles[PERCENTILE_90TH] << std::endl;
+      oss << "    P95  : " << percentiles[PERCENTILE_95TH] << std::endl;
+      oss << "    P99  : " << percentiles[PERCENTILE_99TH] << std::endl;
+      oss << "Maximum  : " << percentiles[MAXIMUM] << std::endl;
+
+
+      std::ofstream myfile;
+
+      std::time_t ts = std::time(NULL);
+      std::ostringstream fnames;
+      fnames << "replay_summary_" << ts << ".txt";
+      myfile.open (fnames.str().c_str());
+
+      myfile << oss.str();
+      myfile.close();
+
+      std::cout << "------------------------------------" << std::endl;
+      std::cout << "Summary Statistics: " << std::endl;
+      std::cout << "------------------------------------" << std::endl;
+      std::cout << oss.str();
+
+    }
+
+};
+
+
 
 class QueryReport {
 
@@ -97,7 +190,7 @@ private:
 
 
   tbb::concurrent_queue<QueryReport> query_report_results;
-
+  unsigned int report_interval = 1000000;
 
 public:
   SimpleReportPlugin(std::string _name) : ReportPlugin(_name)
@@ -126,6 +219,7 @@ public:
      ("ignore-row-result-diffs",
       po::value<bool>(&ignore_row_result_diffs)->default_value(false)->zero_tokens(),
       _("Ignore differences in the number of rows returned."))
+     ("report-interval", po::value<unsigned int>(), _("How often should we print the report log"))
     ;
 
     return &simple_report_options;
@@ -141,6 +235,10 @@ public:
 		  "command line options\n"));
 	return -1;
       }
+    if (vm.count("report-interval"))
+    {
+      report_interval = vm["report-interval"].as<unsigned int>();
+    }
     return 0;
   }
 
@@ -169,12 +267,6 @@ public:
       (*(it_pair.first)).second++;
     }
 
-    // query report has the statistics like duration, thread id, etc.
-    QueryReport query_report;
-    query_report.set_thread_id(thread_id);
-    query_report.set_duration_us(actual.getDuration().total_microseconds());
-    query_report_results.push(query_report);
-
     if (!ignore_row_result_diffs && actual.getRowsSent() != expected.getRowsSent())
     {
       /* Skip this if the input log is general log, because it does not have rows information (value is always 0).*/
@@ -198,6 +290,14 @@ public:
       else
         nr_slower_queries++;
     }
+
+    // query report has the statistics like duration, thread id, etc.
+    QueryReport query_report;
+    query_report.set_thread_id(thread_id);
+    query_report.set_duration_us(actual.getDuration().total_microseconds());
+    query_report_results.push(query_report);
+    if (nr_queries_executed % report_interval == 0)
+        std::cout << nr_queries_executed << " queries are executed" << std::endl;
   }
 
   virtual void print_report()
@@ -262,17 +362,36 @@ public:
       printf("\n");
     }
 
-    print_summary();
+    output_summary();
   }
 
-  void print_summary() {
+  void output_summary() {
     std::list<QueryReport> results;
     QueryReport res;
     while(query_report_results.try_pop(res)) {
       results.push_back(res);
     }
-    for (std::list<QueryReport>::iterator it=results.begin(); it != results.end(); ++it)
-        printf(_("duration microseconds %d\n"), it->get_duration_us());
+    std::vector<long> latencies;
+
+
+    std::time_t ts = std::time(NULL);
+    std::ostringstream fnames;
+    fnames << "replay_results_" << ts << ".txt";
+
+    std::ofstream myfile;
+    myfile.open (fnames.str().c_str());
+
+    myfile << "Thread ID, Duration(microseconds)" << std::endl;
+    for (std::list<QueryReport>::iterator it=results.begin(); it != results.end(); ++it) {
+        myfile << it->get_thread_id() << ", " << it->get_duration_us() << std::endl;
+        latencies.push_back(it->get_duration_us());
+    }
+    myfile.close();
+
+    DistributionStatistics dist;
+    dist.computeStatistics(latencies);
+    dist.output_stats();
+
   }
 
 };
