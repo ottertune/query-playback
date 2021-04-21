@@ -292,12 +292,14 @@ public:
     }
 
     // query report has the statistics like duration, thread id, etc.
-    QueryReport query_report;
-    query_report.set_thread_id(thread_id);
-    query_report.set_duration_us(actual.getDuration().total_microseconds());
-    query_report_results.push(query_report);
+    if (actual.getDuration().total_microseconds() > 0) {
+      QueryReport query_report;
+      query_report.set_thread_id(thread_id);
+      query_report.set_duration_us(actual.getDuration().total_microseconds());
+      query_report_results.push(query_report);
+    }
     if (nr_queries_executed % report_interval == 0)
-        std::cout << nr_queries_executed << " queries are executed" << std::endl;
+      std::cout << nr_queries_executed << " queries are executed" << std::endl;
   }
 
   virtual void print_report()
