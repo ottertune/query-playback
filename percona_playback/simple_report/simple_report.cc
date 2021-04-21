@@ -97,37 +97,22 @@ class DistributionStatistics {
       }
     }
 
-    void output_stats() {
+    std::string get_summary_str() {
 
       std::ostringstream oss;
-      oss << "  Count  : " << count << std::endl;
-      oss << "Average  : " << average << std::endl;
-      oss << " StdDev  : " << standardDeviation << std::endl;
-      oss << "Minimum  : " << percentiles[MINIMUM] << std::endl;
-      oss << "    P25  : " << percentiles[PERCENTILE_25TH] << std::endl;
-      oss << " Median  : " << percentiles[MEDIAN] << std::endl;
-      oss << "    P75  : " << percentiles[PERCENTILE_75TH] << std::endl;
-      oss << "    P90  : " << percentiles[PERCENTILE_90TH] << std::endl;
-      oss << "    P95  : " << percentiles[PERCENTILE_95TH] << std::endl;
-      oss << "    P99  : " << percentiles[PERCENTILE_99TH] << std::endl;
-      oss << "Maximum  : " << percentiles[MAXIMUM] << std::endl;
+      oss << "            # Query  : " << count << std::endl;
+      oss << "Latency Average(us)  : " << average << std::endl;
+      oss << " Latency StdDev(us)  : " << standardDeviation << std::endl;
+      oss << "Latency Minimum(us)  : " << percentiles[MINIMUM] << std::endl;
+      oss << "    Latency P25(us)  : " << percentiles[PERCENTILE_25TH] << std::endl;
+      oss << " Latency Median(us)  : " << percentiles[MEDIAN] << std::endl;
+      oss << "    Latency P75(us)  : " << percentiles[PERCENTILE_75TH] << std::endl;
+      oss << "    Latency P90(us)  : " << percentiles[PERCENTILE_90TH] << std::endl;
+      oss << "    Latency P95(us)  : " << percentiles[PERCENTILE_95TH] << std::endl;
+      oss << "    Latency P99(us)  : " << percentiles[PERCENTILE_99TH] << std::endl;
+      oss << "Latency Maximum(us)  : " << percentiles[MAXIMUM] << std::endl;
 
-
-      std::ofstream myfile;
-
-      std::time_t ts = std::time(NULL);
-      std::ostringstream fnames;
-      fnames << "replay_summary_" << ts << ".txt";
-      myfile.open (fnames.str().c_str());
-
-      myfile << oss.str();
-      myfile.close();
-
-      std::cout << "------------------------------------" << std::endl;
-      std::cout << "Summary Statistics: " << std::endl;
-      std::cout << "------------------------------------" << std::endl;
-      std::cout << oss.str();
-
+      return oss.str();
     }
 
 };
@@ -171,6 +156,9 @@ private:
   tbb::atomic<uint64_t> expected_total_execution_time_ms;
   tbb::atomic<uint64_t> nr_quicker_queries;
   tbb::atomic<uint64_t> nr_slower_queries;
+
+  boost::posix_time::ptime start_time;
+  boost::posix_time::ptime end_time;
 
 #if TBB_VERSION_MAJOR < 3
   tbb::mutex connection_query_count_mutex;
@@ -239,6 +227,9 @@ public:
     {
       report_interval = vm["report-interval"].as<unsigned int>();
     }
+
+    start_time= boost::posix_time::microsec_clock::universal_time();
+
     return 0;
   }
 
@@ -291,8 +282,8 @@ public:
         nr_slower_queries++;
     }
 
-    // query report has the statistics like duration, thread id, etc.
     if (actual.getDuration().total_microseconds() > 0) {
+      // query report has the statistics like duration, thread id, etc.
       QueryReport query_report;
       query_report.set_thread_id(thread_id);
       query_report.set_duration_us(actual.getDuration().total_microseconds());
@@ -364,10 +355,13 @@ public:
       printf("\n");
     }
 
-    output_summary();
+    output_data();
   }
 
-  void output_summary() {
+  void output_data() {
+
+    end_time= boost::posix_time::microsec_clock::universal_time();
+    
     std::list<QueryReport> results;
     QueryReport res;
     while(query_report_results.try_pop(res)) {
@@ -383,6 +377,7 @@ public:
     std::ofstream myfile;
     myfile.open (fnames.str().c_str());
 
+    // output results
     myfile << "Thread ID, Duration(microseconds)" << std::endl;
     for (std::list<QueryReport>::iterator it=results.begin(); it != results.end(); ++it) {
         myfile << it->get_thread_id() << ", " << it->get_duration_us() << std::endl;
@@ -390,10 +385,37 @@ public:
     }
     myfile.close();
 
+    // output summary statistics
     DistributionStatistics dist;
     dist.computeStatistics(latencies);
-    dist.output_stats();
+    std::string summary_str = dist.get_summary_str();
+    output_summary(summary_str);
 
+  }
+
+  void output_summary(std::string summary) {
+
+    std::ofstream myfile;
+
+    std::time_t ts = std::time(NULL);
+    std::ostringstream fnames;
+    fnames << "replay_summary_" << ts << ".txt";
+    myfile.open (fnames.str().c_str());
+
+    std::ostringstream final_summary;
+    final_summary << summary;
+    final_summary << "         Start Time  : " << start_time << std::endl;
+    final_summary << "  Replay Start Time  : " << start_time << std::endl;
+    final_summary << "    Replay End Time  : " << end_time << std::endl;
+    final_summary << "  Replay Total Time  : " << end_time - start_time << std::endl;
+    final_summary << "Replay Total Time(s) : " << (end_time - start_time).total_seconds() << std::endl;
+    myfile << final_summary.str();
+    myfile.close();
+
+    std::cout << "------------------------------------" << std::endl;
+    std::cout << "Summary Statistics: " << std::endl;
+    std::cout << "------------------------------------" << std::endl;
+    std::cout << final_summary.str() << std::endl;
   }
 
 };
