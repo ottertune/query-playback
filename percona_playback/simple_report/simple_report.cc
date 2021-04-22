@@ -404,7 +404,6 @@ public:
 
     std::ostringstream final_summary;
     final_summary << summary;
-    final_summary << "         Start Time  : " << start_time << std::endl;
     final_summary << "  Replay Start Time  : " << start_time << std::endl;
     final_summary << "    Replay End Time  : " << end_time << std::endl;
     final_summary << "  Replay Total Time  : " << end_time - start_time << std::endl;
