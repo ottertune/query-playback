@@ -74,8 +74,15 @@ boost::program_options::options_description* GeneralLogPlugin::getProgramOptions
       return -1;
     }
 
-    if (vm.count("general-log-file"))
+    if (vm.count("general-log-file")) {
       file_name= vm["general-log-file"].as<std::string>();
+      FILE* input_file = fopen(file_name.c_str(),"r");
+      if (input_file == NULL)
+      {
+        fprintf(stderr, _("ERROR: Error opening file '%s': %s\n"), file_name.c_str(), strerror(errno));
+        return -1;
+      }
+    }
     else if (vm["general-log-stdin"].as<bool>())
     {
       std_in = true;

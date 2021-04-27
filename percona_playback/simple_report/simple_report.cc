@@ -298,8 +298,8 @@ public:
     printf(_("Report\n------\n"));
     printf(_("Executed %" PRIu64 " queries\n"), uint64_t(nr_queries_executed));
 
-    boost::posix_time::time_duration total_duration= boost::posix_time::microseconds(total_execution_time_ms);
-    boost::posix_time::time_duration expected_duration= boost::posix_time::microseconds(expected_total_execution_time_ms);
+    boost::posix_time::time_duration total_duration= boost::posix_time::microseconds((unsigned long long)total_execution_time_ms);
+    boost::posix_time::time_duration expected_duration= boost::posix_time::microseconds((unsigned long long)expected_total_execution_time_ms);
     printf(_("Spent %s executing queries versus an expected %s time.\n"),
            boost::posix_time::to_simple_string(total_duration).c_str(),
            boost::posix_time::to_simple_string(expected_duration).c_str()
