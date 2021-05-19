@@ -124,6 +124,7 @@ class QueryReport {
   private:
     uint64_t thread_id;
     long duration_us;  // microseconds
+    std::string timestamp;  // query timestamp
 
   public:
     void set_thread_id(uint64_t _thread_id) {
@@ -141,6 +142,15 @@ class QueryReport {
     long get_duration_us() {
       return duration_us;
     }
+
+    void set_timestamp(std::string ts) {
+      timestamp = ts;
+    }
+
+    std::string get_timestamp() {
+      return timestamp;
+    }
+
 };
 
 
@@ -287,6 +297,7 @@ public:
       QueryReport query_report;
       query_report.set_thread_id(thread_id);
       query_report.set_duration_us(actual.getDuration().total_microseconds());
+      query_report.set_timestamp(expected.getTimestamp());
       query_report_results.push(query_report);
     }
     if (nr_queries_executed % report_interval == 0)
@@ -377,11 +388,17 @@ public:
     std::ofstream myfile;
     myfile.open (fnames.str().c_str());
 
+    std::string query_start_ts;
+    std::string query_end_ts;
     // output results
     myfile << "Thread ID, Duration(microseconds)" << std::endl;
     for (std::list<QueryReport>::iterator it=results.begin(); it != results.end(); ++it) {
         myfile << it->get_thread_id() << ", " << it->get_duration_us() << std::endl;
         latencies.push_back(it->get_duration_us());
+
+        if (query_start_ts.empty())
+          query_start_ts = it->get_timestamp();
+        query_end_ts = it->get_timestamp();
     }
     myfile.close();
 
@@ -389,7 +406,11 @@ public:
     DistributionStatistics dist;
     dist.computeStatistics(latencies);
     std::string summary_str = dist.get_summary_str();
-    output_summary(summary_str);
+    std::ostringstream new_summary;
+    new_summary << summary_str;
+    new_summary << "   Query Start Time  : " << query_start_ts << std::endl;
+    new_summary << "     Query End Time  : " << query_end_ts << std::endl;
+    output_summary(new_summary.str());
 
   }
 
@@ -408,6 +429,7 @@ public:
     final_summary << "    Replay End Time  : " << end_time << std::endl;
     final_summary << "  Replay Total Time  : " << end_time - start_time << std::endl;
     final_summary << "Replay Total Time(s) : " << (end_time - start_time).total_seconds() << std::endl;
+    final_summary << "      # Query Error  : " << nr_error_queries << std::endl;
     myfile << final_summary.str();
     myfile.close();
 
