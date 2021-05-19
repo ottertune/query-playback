@@ -429,6 +429,7 @@ public:
     final_summary << "    Replay End Time  : " << end_time << std::endl;
     final_summary << "  Replay Total Time  : " << end_time - start_time << std::endl;
     final_summary << "Replay Total Time(s) : " << (end_time - start_time).total_seconds() << std::endl;
+    final_summary << "      # Query Error  : " << nr_error_queries << std::endl;
     myfile << final_summary.str();
     myfile.close();
 
