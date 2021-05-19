@@ -26,6 +26,7 @@ class GeneralLogEntry : public QueryEntry
       std::vector<std::string> info;
       std::string set_timestamp_query;
       std::string query;
+      std::string timestamp;
     public:
 
       GeneralLogEntry() : thread_id(0), rows_sent(0), rows_examined(0), query_time(0) {}
@@ -37,6 +38,8 @@ class GeneralLogEntry : public QueryEntry
       void add_query_line(const std::string &s);
 
       inline const std::string& getQuery() { return query; };
+
+      inline const std::string& getTimestamp() { return timestamp; };
 
       inline void display() { std::cerr << "    " << query << std::endl; }
 

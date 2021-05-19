@@ -31,6 +31,7 @@ class QueryResult {
   int _error;
   int _warning_count;
   boost::posix_time::time_duration _duration;
+  std::string _timestamp;
 
  public:
   QueryResult() :  _rows_sent(0),
@@ -67,6 +68,10 @@ class QueryResult {
     _duration= duration;
   }
 
+  void setTimestamp(std::string & ts) {
+    _timestamp = ts;
+  }
+
   uint64_t getRowsSent() const {
     return _rows_sent;
   }
@@ -81,6 +86,10 @@ class QueryResult {
 
   int getWarningCount() const {
     return _warning_count;
+  }
+
+  std::string getTimestamp() const {
+    return _timestamp;
   }
 
   const boost::posix_time::time_duration &getDuration() const {
