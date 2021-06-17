@@ -189,6 +189,7 @@ private:
 
   tbb::concurrent_queue<QueryReport> query_report_results;
   unsigned int report_interval = 1000000;
+  bool print_error_queries = true;
 
 public:
   SimpleReportPlugin(std::string _name) : ReportPlugin(_name)
@@ -218,6 +219,7 @@ public:
       po::value<bool>(&ignore_row_result_diffs)->default_value(false)->zero_tokens(),
       _("Ignore differences in the number of rows returned."))
      ("report-interval", po::value<unsigned int>(), _("How often should we print the report log"))
+     ("print-error-queries", po::value<bool>(), _("Whether to print error queries or not"))
     ;
 
     return &simple_report_options;
@@ -239,7 +241,10 @@ public:
     }
 
     start_time= boost::posix_time::microsec_clock::universal_time();
-
+    if (vm.count("print-error-queries"))
+    {
+      print_error_queries = vm["print-error-queries"].as<bool>();
+    }
     return 0;
   }
 
@@ -251,7 +256,8 @@ public:
   {
     if (actual.getError())
     {
-      fprintf(stderr,_("Error query: %s\n"), query.c_str());
+      if(print_error_queries)
+        fprintf(stderr,_("Error query: %s\n"), query.c_str());
       nr_error_queries++;
     }
 
